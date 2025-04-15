@@ -8,7 +8,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageTk
 import threading
 from facenet_pytorch import InceptionResnetV1
-
+import time
 
 class FaceRecognitionApp:
     def __init__(self, root):
@@ -209,65 +209,78 @@ class FaceRecognitionApp:
         self.update_status("Recognition stopped")
 
     def recognition_loop(self):
+        # Initialize variables for frame skipping
+        self.frame_count = 0
+        self.frame_skip = 3  # Process every 3rd frame
+        self.last_face_time = 0
+        self.face_detection_interval = 0.2  # Seconds between face detections
+
         while self.is_recognizing:
             ret, frame = self.cap.read()
             if not ret:
                 break
 
-            height, width = frame.shape[ :2 ]
-            face_crops = self.detect_face(frame)
-            zoom_applied = False
+            self.frame_count += 1
 
             # Make a copy of the frame for drawing
             display_frame = frame.copy()
+            height, width = frame.shape[ :2 ]
 
-            if self.target_name and face_crops:
-                # Check if target person is in frame
-                for face, (x, y, w, h) in face_crops:
-                    embedding = self.get_embedding(face)
-                    dist, idx = self.knn.kneighbors([ embedding ], n_neighbors=1)
-                    name = "Unknown"
-                    if dist[ 0 ][ 0 ] < 0.8:
-                        name = self.known_names[ idx[ 0 ][ 0 ] ]
-                    try:
-                        if name.lower() == self.target_name.lower():
-                            # Center of the face
-                            face_center_x = x + w // 2
-                            face_center_y = y + h // 2
+            # Perform face detection on every Nth frame or after interval
+            if self.frame_count % self.frame_skip == 0 and time.time() - self.last_face_time >= self.face_detection_interval:
+                face_crops = self.detect_face(frame)
+                self.last_face_time = time.time()
+                zoom_applied = False
 
-                            # Resize whole frame (zoom in)
-                            zoomed_frame = cv2.resize(frame, None, fx=self.zoom_factor, fy=self.zoom_factor)
-                            zh, zw = zoomed_frame.shape[ :2 ]
+                if self.target_name and face_crops:
+                    # Check if target person is in frame
+                    for face, (x, y, w, h) in face_crops:
+                        embedding = self.get_embedding(face)
+                        dist, idx = self.knn.kneighbors([ embedding ], n_neighbors=1)
+                        name = "Unknown"
+                        if dist[ 0 ][ 0 ] < 0.8:
+                            name = self.known_names[ idx[ 0 ][ 0 ] ]
 
-                            # Calculate the crop region centered on the face
-                            center_x_zoomed = int(face_center_x * self.zoom_factor)
-                            center_y_zoomed = int(face_center_y * self.zoom_factor)
+                        try:
+                            if name.lower() == self.target_name.lower():
+                                # Center of the face
+                                face_center_x = x + w // 2
+                                face_center_y = y + h // 2
 
-                            left = center_x_zoomed - width // 2
-                            top = center_y_zoomed - height // 2
+                                # Resize whole frame (zoom in)
+                                zoomed_frame = cv2.resize(frame, None, fx=self.zoom_factor, fy=self.zoom_factor)
+                                zh, zw = zoomed_frame.shape[ :2 ]
 
-                            # Clip to bounds
-                            left = max(0, min(zw - width, left))
-                            top = max(0, min(zh - height, top))
+                                # Calculate the crop region centered on the face
+                                center_x_zoomed = int(face_center_x * self.zoom_factor)
+                                center_y_zoomed = int(face_center_y * self.zoom_factor)
 
-                            cropped_zoom = zoomed_frame[ top:top + height, left:left + width ]
-                            display_frame = cropped_zoom
-                            zoom_applied = True
-                            break
-                    except Exception as e :
-                        print(e)
-            if not zoom_applied:
-                # Draw boxes and names for all faces
-                for face, (x, y, w, h) in face_crops:
-                    embedding = self.get_embedding(face)
-                    dist, idx = self.knn.kneighbors([ embedding ], n_neighbors=1)
-                    name = "Unknown"
-                    if dist[ 0 ][ 0 ] < 0.8:
-                        name = self.known_names[ idx[ 0 ][ 0 ] ]
+                                left = center_x_zoomed - width // 2
+                                top = center_y_zoomed - height // 2
 
-                    color = (0, 255, 0)
-                    cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
-                    cv2.putText(display_frame, name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
+                                # Clip to bounds
+                                left = max(0, min(zw - width, left))
+                                top = max(0, min(zh - height, top))
+
+                                cropped_zoom = zoomed_frame[ top:top + height, left:left + width ]
+                                display_frame = cropped_zoom
+                                zoom_applied = True
+                                break
+                        except Exception as e:
+                            print(e)
+
+                if not zoom_applied and face_crops:
+                    # Draw boxes and names for all faces
+                    for face, (x, y, w, h) in face_crops:
+                        embedding = self.get_embedding(face)
+                        dist, idx = self.knn.kneighbors([ embedding ], n_neighbors=1)
+                        name = "Unknown"
+                        if dist[ 0 ][ 0 ] < 0.8:
+                            name = self.known_names[ idx[ 0 ][ 0 ] ]
+
+                        color = (0, 255, 0)
+                        cv2.rectangle(display_frame, (x, y), (x + w, y + h), color, 2)
+                        cv2.putText(display_frame, name, (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.9, color, 2)
 
             # Convert to RGB for tkinter
             rgb_frame = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
@@ -291,10 +304,10 @@ class FaceRecognitionApp:
             self.video_label.config(image=photo)
             self.video_label.image = photo  # Keep a reference
 
-            # Sleep to reduce
-            # ()
-            self.root.update()
+            # Sleep to reduce CPU usage
+            time.sleep(0.01)
 
+            self.root.update()
     def set_target_person(self):
         target = self.target_entry.get().strip()
         if not target:
