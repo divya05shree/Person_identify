@@ -1,0 +1,45 @@
+import cv2
+import torch
+from ultralytics import YOLO
+from deep_sort_realtime.deepsort_tracker import DeepSort
+
+# Load YOLOv8 model
+model = YOLO("yolov8n.pt")  # You can use yolov8s.pt, yolov8m.pt, etc.
+
+# Initialize DeepSORT
+tracker = DeepSort(max_age=30)
+# Open video or webcam
+cap = cv2.VideoCapture(0)  # Use 'video.mp4' for a video file
+
+while True:
+    ret, frame = cap.read()
+    if not ret:
+        break
+
+    # Run YOLOv8 detection
+    results = model.predict(frame, classes=[0], conf=0.4, verbose=False)[0]  # class 0 = person
+
+    detections = []
+    for box in results.boxes.data.tolist():
+        x1, y1, x2, y2, conf, cls = box
+        detections.append(([x1, y1, x2 - x1, y2 - y1], conf, 'person'))
+
+    # Update tracker
+    tracks = tracker.update_tracks(detections, frame=frame)
+
+    for track in tracks:
+        if not track.is_confirmed():
+            continue
+
+        track_id = track.track_id
+        l, t, w, h = track.to_ltrb()
+        r, b = int(l + w), int(t + h)
+        cv2.rectangle(frame, (int(l), int(t)), (r, b), (0, 255, 0), 2)
+        cv2.putText(frame, f'ID: {track_id}', (int(l), int(t) - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 0, 0), 2)
+
+    cv2.imshow("YOLOv8 + DeepSORT Tracking", frame)
+    if cv2.waitKey(1) == ord('q'):
+        break
+
+cap.release()
+cv2.destroyAllWindows()

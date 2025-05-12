@@ -74,7 +74,7 @@ class FaceRecognitionApp:
         """Load face embeddings and attendance data"""
 
         try:
-            with open("embeddings.pkl", "rb") as f:
+            with open("Embeddings/embeddings.pkl", "rb") as f:
                 self.known_embeddings, self.known_names = pickle.load(f)
             print(f"Loaded {len(self.known_names)} faces from embeddings file.")
             self.embeddings_loaded = True
@@ -83,7 +83,7 @@ class FaceRecognitionApp:
 
         # Try to load existing attendance records
         try:
-            self.attendance_df = pd.read_csv("Attendance.csv")
+            self.attendance_df = pd.read_csv("Attendance/Attendance.csv")
             print(f"Loaded attendance records with {len(self.attendance_df)} entries.")
         except (FileNotFoundError, pd.errors.EmptyDataError):
             # Create a new attendance DataFrame if none exists
@@ -187,7 +187,7 @@ class FaceRecognitionApp:
             self.model = InceptionResnetV1(pretrained='vggface2').eval()
 
         if self.facemodel is None:
-            self.facemodel = YOLO('best.pt')
+            self.facemodel = YOLO('Yoloweights/best.pt')
 
         # Start registration in a separate thread
         threading.Thread(target=self.register_dataset, daemon=True).start()
@@ -231,7 +231,7 @@ class FaceRecognitionApp:
                     known_names.append(person)
 
         # Save embeddings
-        with open("embeddings.pkl", "wb") as f:
+        with open("Embeddings/embeddings.pkl", "wb") as f:
             pickle.dump((known_embeddings, known_names), f)
 
         # Update internal variables
@@ -261,7 +261,7 @@ class FaceRecognitionApp:
 
         if self.facemodel is None:
             self.update_status("Loading face detection model...")
-            self.facemodel = YOLO('best.pt')
+            self.facemodel = YOLO('Yoloweights/best.pt')
 
         self.is_recognizing = True
 
@@ -373,7 +373,7 @@ class FaceRecognitionApp:
         # Load existing data if needed
         if self.attendance_df is None:
             try:
-                self.attendance_df = pd.read_csv("Attendance.csv")
+                self.attendance_df = pd.read_csv("Attendance/Attendance.csv")
             except (FileNotFoundError, pd.errors.EmptyDataError):
                 self.attendance_df = pd.DataFrame(columns=[ "Name", "Date", "Time", "Duration" ])
 
@@ -600,7 +600,7 @@ class FaceRecognitionApp:
         # Load attendance data if needed
         if self.attendance_df is None or len(self.attendance_df) == 0:
             try:
-                self.attendance_df = pd.read_csv("Attendance.csv")
+                self.attendance_df = pd.read_csv("Attendance/Attendance.csv")
             except (FileNotFoundError, pd.errors.EmptyDataError):
                 return pd.DataFrame(columns=[ "Name", "Total Hours", "Expected Hours", "LOH" ])
 

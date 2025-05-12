@@ -71,7 +71,7 @@ def register_dataset(dataset_path):
                 print("    ⚠️ No face detected.")
 
     # Save only after all embeddings are collected
-    with open("embeddings.pkl", "wb") as f:
+    with open("Embeddings/embeddings.pkl", "wb") as f:
         pickle.dump((known_embeddings, known_names), f)
     print("✅ Embeddings registered and saved.")
 
@@ -83,7 +83,7 @@ def recognize_faces():
     from sklearn.neighbors import NearestNeighbors
 
     # Load embeddings
-    with open("embeddings.pkl", "rb") as f:
+    with open("Embeddings/embeddings.pkl", "rb") as f:
         known_embeddings, known_names = pickle.load(f)
     knn = NearestNeighbors(n_neighbors=1)
     knn.fit(known_embeddings)

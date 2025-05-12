@@ -34,7 +34,7 @@ class FaceRecognitionApp:
         self.current_frame = None
         self.known_embeddings = [ ]
         self.known_names = [ ]
-        self.facemodel = YOLO('best.pt')
+        self.facemodel = YOLO('Yoloweights/best.pt')
 
         # Attendance tracking variables
         self.last_attendance_time = defaultdict(int)  # Dictionary to track when each person last registered attendance
@@ -44,7 +44,7 @@ class FaceRecognitionApp:
 
         # Try to load existing embeddings
         try:
-            with open("embeddings.pkl", "rb") as f:
+            with open("Embeddings/embeddings.pkl", "rb") as f:
                 self.known_embeddings, self.known_names = pickle.load(f)
             print(f"Loaded {len(self.known_names)} faces from embeddings file.")
         except FileNotFoundError:
@@ -52,7 +52,7 @@ class FaceRecognitionApp:
 
         # Try to load existing attendance records
         try:
-            self.attendance_df = pd.read_csv("Attendance.csv")
+            self.attendance_df = pd.read_csv("Attendance/Attendance.csv")
             print(f"Loaded attendance records with {len(self.attendance_df)} entries.")
         except (FileNotFoundError, pd.errors.EmptyDataError):
             # Create a new attendance DataFrame if none exists
@@ -196,7 +196,7 @@ class FaceRecognitionApp:
                     known_names.append(person)
 
         # Save embeddings
-        with open("embeddings.pkl", "wb") as f:
+        with open("Embeddings/embeddings.pkl", "wb") as f:
             pickle.dump((known_embeddings, known_names), f)
 
         # Update internal variables

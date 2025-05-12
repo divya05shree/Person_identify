@@ -1,0 +1,345 @@
+import os
+import cv2
+import numpy as np
+import mediapipe as mp
+
+class FaceRecognition:
+    def __init__(self, data_folder='../Real Images', recognizer_file='face_recognizer.yml'):
+        self.data_folder = data_folder
+        self.recognizer_file = recognizer_file
+        self.face_detector = cv2.CascadeClassifier(cv2.data.haarcascades + 'haarcascade_frontalface_default.xml')
+        self.recognizer = cv2.face.LBPHFaceRecognizer_create()
+
+        # Load recognizer if file exists
+        if os.path.exists(recognizer_file):
+            self.recognizer.read(recognizer_file)
+
+        # Dictionary to map user IDs to names
+        self.id_name_map = {}
+        self.next_id = 1
+
+        # Load existing user data if available
+        self._load_user_mapping()
+
+    def _load_user_mapping(self):
+        """Load existing user ID to name mapping from folders"""
+        if os.path.exists(self.data_folder):
+            folders = [ f for f in os.listdir(self.data_folder) if os.path.isdir(os.path.join(self.data_folder, f)) ]
+            for folder in folders:
+                try:
+                    # Extract user ID from folder name if it follows the format "id_name"
+                    if '_' in folder:
+                        user_id = int(folder.split('_')[ 0 ])
+                        name = folder.split('_', 1)[ 1 ]
+                        self.id_name_map[ user_id ] = name
+                        self.next_id = max(self.next_id, user_id + 1)
+                except ValueError:
+                    # If folder doesn't follow the expected format, skip it
+                    continue
+
+    def register_user(self, name, images=None, camera_source=0, num_samples=20):
+        """
+        Register a new user by creating a folder and saving face samples
+
+        Args:
+            name: User's name
+            images: List of numpy arrays containing face images (optional)
+            camera_source: Camera index to use for capturing images (if images not provided)
+            num_samples: Number of samples to capture from camera
+
+        Returns:
+            user_id: ID of the registered user
+        """
+        # Assign a new ID to the user
+        user_id = self.next_id
+        self.next_id += 1
+
+        # Create user folder if it doesn't exist
+        user_folder = os.path.join(self.data_folder, f"{user_id}_{name}")
+        if not os.path.exists(self.data_folder):
+            os.makedirs(self.data_folder)
+        if not os.path.exists(user_folder):
+            os.makedirs(user_folder)
+
+        # Map user ID to name
+        self.id_name_map[ user_id ] = name
+
+        # If images are provided, save them
+        face_samples = [ ]
+        labels = [ ]
+
+        if images is not None:
+            for i, img in enumerate(images):
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+                faces = self.face_detector.detectMultiScale(gray, 1.3, 5)
+
+                if len(faces) > 0:
+                    x, y, w, h = faces[ 0 ]  # Use the first detected face
+                    face_sample = gray[ y:y + h, x:x + w ]
+                    cv2.imwrite(f"{user_folder}/sample_{i}.jpg", face_sample)
+                    face_samples.append(face_sample)
+                    labels.append(user_id)
+        else:
+            # Capture images from camera
+            cap = cv2.VideoCapture(camera_source)
+            count = 0
+
+            while count < num_samples:
+                ret, img = cap.read()
+                if not ret:
+                    break
+
+                gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+                faces = self.face_detector.detectMultiScale(gray, 1.3, 5)
+
+                if len(faces) > 0:
+                    x, y, w, h = faces[ 0 ]  # Use the first detected face
+                    face_sample = gray[ y:y + h, x:x + w ]
+                    # Save the captured image into the folder
+                    cv2.imwrite(f"{user_folder}/sample_{count}.jpg", face_sample)
+                    face_samples.append(face_sample)
+                    labels.append(user_id)
+                    count += 1
+
+                    # Display the image with rectangle around face
+                    cv2.rectangle(img, (x, y), (x + w, y + h), (255, 0, 0), 2)
+                    cv2.putText(img, f"Capturing: {count}/{num_samples}", (x, y - 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+                    cv2.imshow('Registering Face', img)
+
+                # Wait for 100 milliseconds
+                if cv2.waitKey(100) & 0xFF == ord('q'):
+                    break
+
+            cap.release()
+            cv2.destroyAllWindows()
+
+        # Train recognizer with new data
+        if face_samples:
+            self.train_from_samples(face_samples, labels)
+
+        return user_id
+
+    def register_from_folder(self, folder_path=None):
+        """
+        Register users from existing folder structure
+
+        Args:
+            folder_path: Path to folder containing user folders (if None, uses self.data_folder)
+
+        Returns:
+            List of registered user IDs
+        """
+        folder_path = folder_path or self.data_folder
+        if not os.path.exists(folder_path):
+            print(f"Error: Folder {folder_path} does not exist")
+            return [ ]
+
+        user_folders = [ f for f in os.listdir(folder_path) if os.path.isdir(os.path.join(folder_path, f)) ]
+        registered_ids = [ ]
+
+        face_samples = [ ]
+        labels = [ ]
+
+        for folder in user_folders:
+            try:
+                # Extract user ID and name from folder name
+                if '_' in folder:
+                    user_id = int(folder.split('_')[ 0 ])
+                    name = folder.split('_', 1)[ 1 ]
+                else:
+                    # For folders without proper naming, assign a new ID
+                    user_id = self.next_id
+                    self.next_id += 1
+                    name = folder
+
+                # Update mapping
+                self.id_name_map[ user_id ] = name
+                registered_ids.append(user_id)
+
+                # Load face samples from the folder
+                user_folder = os.path.join(folder_path, folder)
+                for image_file in os.listdir(user_folder):
+                    if image_file.endswith(('.jpg', '.jpeg', '.png')):
+                        img_path = os.path.join(user_folder, image_file)
+                        img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                        if img is not None:
+                            face_samples.append(img)
+                            labels.append(user_id)
+            except Exception as e:
+                print(f"Error processing folder {folder}: {e}")
+
+        # Train recognizer with the loaded data
+        if face_samples:
+            self.train_from_samples(face_samples, labels)
+
+        return registered_ids
+
+    def train_from_samples(self, face_samples, labels):
+        """Train the recognizer with face samples and labels"""
+        if not face_samples or len(face_samples) != len(labels):
+            return False
+
+        self.recognizer.train(face_samples, np.array(labels))
+        self.recognizer.write(self.recognizer_file)
+        return True
+
+    def train_all(self):
+        """Train recognizer using all available data in the data folder"""
+        face_samples = [ ]
+        labels = [ ]
+
+        # Iterate through all user folders
+        for user_folder in os.listdir(self.data_folder):
+            folder_path = os.path.join(self.data_folder, user_folder)
+
+            if os.path.isdir(folder_path) and '_' in user_folder:
+                try:
+                    user_id = int(user_folder.split('_')[ 0 ])
+
+                    # Load all images for this user
+                    for image_file in os.listdir(folder_path):
+                        if image_file.endswith(('.jpg', '.jpeg', '.png')):
+                            img_path = os.path.join(folder_path, image_file)
+                            img = cv2.imread(img_path, cv2.IMREAD_GRAYSCALE)
+                            if img is not None:
+                                face_samples.append(img)
+                                labels.append(user_id)
+                except Exception as e:
+                    print(f"Error processing folder {user_folder}: {e}")
+
+        # Train recognizer with all data
+        if face_samples:
+            return self.train_from_samples(face_samples, labels)
+        return False
+
+    def recognize(self, image, confidence_threshold=70):
+        """
+        Recognize faces in the given image
+
+        Args:
+            image: Input image (numpy array)
+            confidence_threshold: Maximum confidence threshold for acceptance
+
+        Returns:
+            List of (name, confidence) tuples for recognized faces
+        """
+        results = [ ]
+
+        # Convert to grayscale if needed
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY) if len(image.shape) == 3 else image
+
+        # Detect faces
+        faces = self.face_detector.detectMultiScale(gray, 1.3, 5)
+
+        for (x, y, w, h) in faces:
+            face = gray[ y:y + h, x:x + w ]
+
+            # Recognize the face
+            user_id, confidence = self.recognizer.predict(face)
+
+            # Lower confidence means better match in LBPH
+            confidence_score = 100 - confidence
+
+            if confidence_score >= confidence_threshold and user_id in self.id_name_map:
+                name = self.id_name_map[ user_id ]
+            else:
+                name = "Unknown"
+
+            results.append({
+                'name': name,
+                'confidence': confidence_score,
+                'user_id': user_id if user_id in self.id_name_map else None,
+                'position': (x, y, w, h)
+            })
+
+        return results
+
+    def delete_user(self, user_id):
+        """
+        Delete a user from the system
+
+        Args:
+            user_id: ID of the user to delete
+
+        Returns:
+            bool: Success status
+        """
+        if user_id not in self.id_name_map:
+            return False
+
+        # Find user folder
+        user_name = self.id_name_map[ user_id ]
+        folder_name = f"{user_id}_{user_name}"
+        folder_path = os.path.join(self.data_folder, folder_name)
+
+        # Delete folder if it exists
+        if os.path.exists(folder_path):
+            for file in os.listdir(folder_path):
+                os.remove(os.path.join(folder_path, file))
+            os.rmdir(folder_path)
+
+        # Remove from id_name_map
+        del self.id_name_map[ user_id ]
+
+        # Retrain the model (this is necessary after deleting a user)
+        self.train_all()
+
+        return True
+
+    def list_users(self):
+        """
+        List all registered users
+
+        Returns:
+            dict: Dictionary mapping user IDs to names
+        """
+        return self.id_name_map
+
+
+# Example usage
+if __name__ == "__main__":
+    face_system = FaceRecognition()
+
+    # Register from existing folders
+    face_system.register_from_folder()
+
+    # Display registered users
+    print("Registered users:")
+    for user_id, name in face_system.list_users().items():
+        print(f"ID: {user_id}, Name: {name}")
+
+    # Register a new user from camera
+    # new_id = face_system.register_user("John Doe")
+    # print(f"Registered new user with ID: {new_id}")
+
+    # Recognize faces from camera
+    cap = cv2.VideoCapture(3)
+
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Recognize faces in the frame
+        results = face_system.recognize(frame)
+
+        # Draw rectangles and labels
+        for result in results:
+            x, y, w, h = result[ 'position' ]
+            name = result[ 'name' ]
+            confidence = result[ 'confidence' ]
+
+            cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
+            cv2.putText(frame, f"{name} ({confidence:.1f}%)",
+                        (x, y - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 255, 0), 2)
+
+        # Display the resulting frame
+        cv2.imshow('Face Recognition', frame)
+
+        if cv2.waitKey(1) & 0xFF == ord('q'):
+            break
+
+    # Release resources
+    cap.release()
+    cv2.destroyAllWindows()
